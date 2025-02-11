@@ -42,6 +42,12 @@ subprocess.run(["ls", "-l"])
 
 ```
 
+You can also set an environment variable PYSANDBOX_TIMEOUT to specify the timeout duration in seconds. For example, to set a timeout of 6 seconds:
+
+```sh
+export PYSANDBOX_TIMEOUT=6
+```
+
 ## Features
 
 1. Disables dangerous built-in functions (exec, eval, open).
