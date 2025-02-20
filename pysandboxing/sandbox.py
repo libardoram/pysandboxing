@@ -4,6 +4,7 @@ import importlib.util
 import signal
 import logging
 import os
+from importlib.abc import MetaPathFinder, Loader
 
 # Configure logging to log to a file (e.g., 'blocked_imports.log')
 logging.basicConfig(
@@ -43,20 +44,36 @@ restricted_modules = {
     "trace", "tracemalloc", "pdb", "cProfile",
 }
 
-class RestrictedImport:
-    def __init__(self, original_import):
-        self.original_import = original_import
+class RestrictedLoader(Loader):
+    def __init__(self, fullname, path):
+        self.fullname = fullname
+        self.path = path
 
+class RestrictedImportFinder(MetaPathFinder):
+    def __init__(self, allowed_modules=None):
+        self.allowed_modules = allowed_modules or ['builtins']
+        
     def find_spec(self, fullname, path, target=None):
-        if fullname in restricted_modules:
-            # Get the absolute file path of the script where the import is attempted
-            file_path = os.path.abspath(sys.argv[0])  # Get the current script's absolute path
-            # Log the attempted import with the full file path
-            logging.warning(f"Attempted import of restricted module: {fullname} in file: {file_path}")
-            return None
-        return importlib.util.find_spec(fullname)
+        # Check if module is allowed
+        if any(fullname.startswith(allowed) for allowed in self.allowed_modules):
+            # Use original spec finding mechanism but avoid recursive calls
+            if not hasattr(sys.modules.get(fullname, None), '__spec__'):
+                spec = self._original_find_spec(fullname, path)
+                return spec
+        return None
+    
+    def _original_find_spec(self, fullname, path):
+        """Helper method to find spec without causing recursion"""
+        # Temporarily remove self from meta_path to avoid recursion
+        sys.meta_path.remove(self)
+        try:
+            spec = importlib.util.find_spec(fullname)
+        finally:
+            # Restore self to meta_path
+            sys.meta_path.insert(0, self)
+        return spec
 
-sys.meta_path.insert(0, RestrictedImport(__import__))
+sys.meta_path.insert(0, RestrictedImportFinder())
 
 # -------------------------------
 # TIMEOUT ENFORCEMENT (Linux/macOS)
