@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pysandboxing",  # Name of your package
-    version="0.1.2",  # Initial version
+    version="0.1.3",  # Initial version
     packages=find_packages(),  # Automatically finds all packages in the directory
     install_requires=[],  # List of dependencies (if any)
     author="Libardo Ramirez Tirado",  # Replace with your name
