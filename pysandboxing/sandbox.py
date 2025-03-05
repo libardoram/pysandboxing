@@ -1,22 +1,15 @@
-import builtins
 import sys
-import importlib.util
 import signal
 import logging
 import os
-from importlib.abc import MetaPathFinder, Loader
+import inspect
 
 # Configure logging to log to a file (e.g., 'blocked_imports.log')
 logging.basicConfig(
-    filename="pysandbox_blocked_imports.log", 
     level=logging.WARNING,  # Set to WARNING level to capture restricted imports
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# Disable exec, eval, and open access to dangerous built-in functions
-builtins.exec = None
-builtins.eval = None
-builtins.open = None
 
 # Restrict modules
 restricted_modules = {
@@ -44,46 +37,45 @@ restricted_modules = {
     "trace", "tracemalloc", "pdb", "cProfile",
 }
 
-class RestrictedLoader(Loader):
-    def __init__(self, fullname, path):
-        self.fullname = fullname
-        self.path = path
-
-class RestrictedImportFinder(MetaPathFinder):
-    def __init__(self, allowed_modules=None):
-        self.allowed_modules = allowed_modules or ['builtins']
-        
+class RestrictedImportFinder:
     def find_spec(self, fullname, path, target=None):
-        # Check if module is allowed
-        if any(fullname.startswith(allowed) for allowed in self.allowed_modules):
-            # Use original spec finding mechanism but avoid recursive calls
-            if not hasattr(sys.modules.get(fullname, None), '__spec__'):
-                spec = self._original_find_spec(fullname, path)
-                return spec
-        return None
-    
-    def _original_find_spec(self, fullname, path):
-        """Helper method to find spec without causing recursion"""
-        # Temporarily remove self from meta_path to avoid recursion
-        sys.meta_path.remove(self)
-        try:
-            spec = importlib.util.find_spec(fullname)
-        finally:
-            # Restore self to meta_path
-            sys.meta_path.insert(0, self)
-        return spec
+        if fullname in restricted_modules:
+            # Get the caller's frame info
+            caller_frame = inspect.currentframe().f_back
+            calling_file = "unknown"
+            
+            # Walk up the stack to find the originating .py file
+            while caller_frame:
+                filename = caller_frame.f_code.co_filename
+                if filename.endswith('.py') and not filename.endswith('sandbox.py'):
+                    calling_file = os.path.abspath(filename)  # Get full path
+                    break
+                caller_frame = caller_frame.f_back
+            
+            logging.warning(f"Import of module '{fullname}' is restricted in file '{calling_file}'")
+            sys.exit(1)
+        return None  # Allow normal import process
 
+# Insert our custom finder at the beginning of the import system
 sys.meta_path.insert(0, RestrictedImportFinder())
 
-# -------------------------------
-# TIMEOUT ENFORCEMENT (Linux/macOS)
-# -------------------------------
-
-TIMEOUT_SECONDS = int(os.getenv('PYSANDBOX_TIMEOUT', 60))  # Set timeout duration from environment or default to 60 seconds
+TIMEOUT_SECONDS = int(os.getenv('PYSANDBOX_TIMEOUT', 6))  # Set timeout duration from environment or default to 60 seconds
 
 def timeout_handler(signum, frame):
     """ Handler for forced termination on timeout. """
-    logging.warning("Execution stopped due to possible infinite loop!")
+    # Get the caller's frame info
+    caller_frame = frame
+    calling_file = "unknown"
+    
+    # Walk up the stack to find the originating .py file
+    while caller_frame:
+        filename = caller_frame.f_code.co_filename
+        if filename.endswith('.py') and not filename.endswith('sandbox.py'):
+            calling_file = os.path.abspath(filename)  # Get full path
+            break
+        caller_frame = caller_frame.f_back
+    
+    logging.warning(f"Execution stopped due to possible infinite loop in {calling_file}!")
     sys.exit(1)  # Forcefully exit the process
 
 # Set the alarm timeout when the sandbox is imported
